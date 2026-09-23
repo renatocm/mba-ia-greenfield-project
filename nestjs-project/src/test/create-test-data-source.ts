@@ -6,7 +6,7 @@ interface TestDataSourceOptions {
 }
 
 export function createTestDataSource(
-  entities: (Function | string | EntitySchema<any>)[],
+  entities: (string | (new () => object) | EntitySchema<object>)[],
   options: TestDataSourceOptions = {},
 ): DataSource {
   const { synchronize = true, migrations } = options;
@@ -16,7 +16,7 @@ export function createTestDataSource(
     port: Number(process.env.DB_PORT ?? 5432),
     username: process.env.DB_USERNAME ?? 'streamtube',
     password: process.env.DB_PASSWORD ?? 'streamtube',
-    database: process.env.DB_DATABASE ?? 'streamtube',
+    database: process.env.DB_NAME ?? 'streamtube',
     entities,
     synchronize,
     ...(migrations !== undefined && { migrations, migrationsRun: false }),

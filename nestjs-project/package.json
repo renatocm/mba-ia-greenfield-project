@@ -88,6 +88,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
+    "maxWorkers": 1,
+    "setupFilesAfterEnv": ["<rootDir>/test/setup.ts"],
     "setupFiles": [
       "dotenv/config"
     ]

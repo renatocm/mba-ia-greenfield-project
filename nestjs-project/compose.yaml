@@ -7,6 +7,9 @@ services:
       - 3000:3000
     volumes:
       - .:/home/node/app
+      - node_modules:/home/node/app/node_modules
+    environment:
+      DB_HOST: db
     depends_on:
       db:
         condition: service_healthy
@@ -33,4 +36,5 @@ services:
       - "1025:1025"
       - "8025:8025"
 
-
+volumes:
+  node_modules:

@@ -27,6 +27,32 @@
 
 ## Project setup
 
+### Docker baseline
+
+```bash
+docker compose up -d --build
+docker compose exec nestjs-api npm ci
+docker compose exec nestjs-api npm run migration:run
+docker compose exec nestjs-api npm test
+docker compose exec nestjs-api npm run test:e2e
+docker compose exec nestjs-api npx tsc --noEmit
+docker compose exec nestjs-api npm run lint
+```
+
+Dependencies are installed inside Docker in a separate `node_modules` volume,
+so native Linux packages do not reuse the host's macOS/Windows installation.
+Run `npm ci` in the container again after changing the lockfile.
+To recreate containers while retaining the PostgreSQL volume, use
+`docker compose up -d --force-recreate`; no manual network connection is needed.
+
+Jest creates and removes a disposable PostgreSQL database per suite (the test
+user needs `CREATEDB`). E2E databases receive the real migrations. Suites run
+serially because they also share Mailpit. Test JWT secrets are configured only
+in the Jest setup. To start the application, first copy `.env.example` to `.env`
+and configure its values, then run `docker compose exec nestjs-api npm run start:dev`.
+
+### Local installation
+
 ```bash
 $ npm install
 ```

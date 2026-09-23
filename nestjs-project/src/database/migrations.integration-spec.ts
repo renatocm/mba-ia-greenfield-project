@@ -30,19 +30,9 @@ describe('Database migrations (integration)', () => {
     );
 
     await dataSource.initialize();
-
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-    ]);
   });
 
   afterAll(async () => {
-    // The second test undoes the last migration, leaving token tables missing.
-    // Re-apply so the shared DB is fully migrated when subsequent suites run.
-    await dataSource.runMigrations();
     await dataSource.destroy();
   });
 
