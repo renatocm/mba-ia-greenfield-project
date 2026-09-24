@@ -124,7 +124,59 @@ Sufixos: `*.test.ts(x)` (unitário), `*.integration.test.ts(x)` (Route Handlers 
 
 ## ✅ Funcionalidades implementadas
 
-**Fase 01 — Configuração base** e **Fase 02 — Autenticação** estão concluídas (backend + frontend).
+**Fase 01 — Configuração base**, **Fase 02 — Autenticação** estão concluídas (backend + frontend).
+
+**Fase 03 — Upload e Processamento de Vídeos** está concluída (backend).
+
+### Upload e Processamento de Vídeos (Fase 03)
+
+Fluxo completo de **upload multipart direto para S3/MinIO → processamento assíncrono com worker → geração de thumbnail → stream/download com presigned URLs**.
+
+**Arquitetura:**
+- **Upload:** cliente cria sessão de draft, recebe presigned URLs (1h expiração), faz upload de partes diretamente ao MinIO, completa multipart
+- **Processamento:** API enfileira job em Redis/BullMQ, worker consome, executa FFmpeg/ffprobe, gera thumbnail, persiste metadata
+- **Acesso:** vídeos em READY são públicos (anônimo + autenticado); stream/download via signed URLs (30min/24h expiração)
+- **Armazenamento:** S3-compatible (MinIO local, S3 em produção); buckets separados para originals (privado) e public (thumbnails)
+
+Endpoints da API (`nestjs-project`):
+
+| Método & Rota | Descrição | Auth |
+|---------------|-----------|------|
+| `POST /videos/upload-session` | Cria draft e retorna presigned URLs para parts | required |
+| `GET /videos/upload-session/:videoId/parts` | Lista parts uploaded e missing | required |
+| `POST /videos/upload-session/complete` | Conclui multipart e enfileira processamento | required |
+| `DELETE /videos/upload-session/:videoId` | Aborta sessão e limpa draft | required |
+| `GET /videos/{publicId}` | Retorna metadados do vídeo (public para READY) | optional |
+| `GET /videos/{publicId}/stream` | Retorna signed URL do stream (1800s expiration) | optional (READY) |
+| `GET /videos/{publicId}/download` | Retorna signed URL do download (86400s expiration) | optional (READY) |
+| `GET /channels/{channelId}/videos` | Lista vídeos do canal (public vê somente READY) | optional |
+
+**Ciclo de status:**
+1. `DRAFT` — usuário criou sessão, upload não concluído
+2. `PROCESSING` — worker recebeu job, processando com FFmpeg
+3. `READY` — processamento concluído, thumbnail gerada, vídeo acessível publicamente
+4. `ERROR` — processamento falhou após retries; usuário vê last_error
+
+**Armazenamento S3:**
+- `videos-originals/{publicId}/original.mp4` — arquivo original (privado)
+- `videos-public/{publicId}/{publicId}_default.jpg` — thumbnail (público)
+
+**Validação de infraestrutura:**
+
+```bash
+# Confirme que os containers estão rodando
+docker compose up -d --build
+docker compose ps
+
+# API e worker devem estar HEALTHY
+# MinIO e Redis devem estar HEALTHY
+
+# Teste FFmpeg disponível
+docker compose exec video-worker ffmpeg -version
+docker compose exec video-worker ffprobe -version
+```
+
+---
 
 ### Autenticação (Fase 02)
 
@@ -195,7 +247,7 @@ green-field-ia-project/
 |------|-----------|--------|
 | **01** | Configuração Base do Projeto | ✅ Concluída |
 | **02** | Cadastro, Login e Gerenciamento de Conta | ✅ Concluída |
-| **03** | Upload e Processamento de Vídeos | ⏳ Planejada |
+| **03** | Upload e Processamento de Vídeos | ✅ Concluída |
 | **04** | Gerenciamento de Vídeos e Canal | ⏳ Planejada |
 | **05** | Página de Visualização do Vídeo | ⏳ Planejada |
 | **06** | Interações Sociais (Likes, Comentários, Inscrições) | ⏳ Planejada |

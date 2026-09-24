@@ -25,10 +25,16 @@
     "migration:generate": "npm run typeorm -- migration:generate -d src/database/data-source.ts",
     "migration:create": "npm run typeorm -- migration:create",
     "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' src/database/seeds/seed.ts",
-    "openapi:export": "ts-node -r tsconfig-paths/register src/openapi-export.ts"
+    "openapi:export": "ts-node -r tsconfig-paths/register src/openapi-export.ts",
+    "start:worker": "ts-node -r tsconfig-paths/register src/video-worker/main.ts",
+    "start:worker:dev": "ts-node --transpile-only -r tsconfig-paths/register src/video-worker/main.ts",
+    "start:worker:prod": "node dist/video-worker/main.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1139.0",
+    "@aws-sdk/s3-request-presigner": "^3.1139.0",
     "@nestjs-modules/mailer": "^2.3.4",
+    "@nestjs/bullmq": "^11.0.5",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
@@ -38,10 +44,13 @@
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^11.0.1",
     "argon2": "^0.41.1",
+    "bullmq": "^5.81.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
     "handlebars": "^4.7.9",
+    "ioredis": "^5.11.1",
     "joi": "^18.1.2",
+    "nanoid": "^3.3.19",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
@@ -89,9 +98,14 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "maxWorkers": 1,
-    "setupFilesAfterEnv": ["<rootDir>/test/setup.ts"],
+    "setupFilesAfterEnv": [
+      "<rootDir>/test/setup.ts"
+    ],
     "setupFiles": [
       "dotenv/config"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!(?:@nestjs/bullmq|@nestjs/bull-shared)/)"
     ]
   }
 }

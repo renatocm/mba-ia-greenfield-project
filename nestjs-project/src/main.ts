@@ -11,9 +11,12 @@ import { buildSwaggerDocument } from './swagger/swagger-document';
 import swaggerMetadata from './metadata.js';
 
 async function bootstrap() {
+  process.env.SERVICE_NAME = 'api';
+
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port') ?? 3000;
+  app.enableShutdownHooks();
 
   app.useGlobalPipes(
     new ValidationPipe({
