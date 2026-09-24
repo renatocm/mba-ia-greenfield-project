@@ -1,3 +1,4 @@
+import type { ValidationResult } from 'joi';
 import { envValidationSchema } from './env.validation';
 
 const requiredEnv = {
@@ -12,7 +13,7 @@ const validate = (env: Record<string, string>) =>
   envValidationSchema.validate(
     { ...requiredEnv, ...env },
     { allowUnknown: true, abortEarly: false },
-  );
+  ) as ValidationResult<Record<string, unknown>>;
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {
   it('should reject SWAGGER_ENABLED with an invalid value', () => {
@@ -32,8 +33,9 @@ describe('envValidationSchema — SWAGGER_ENABLED', () => {
   });
 
   it('should apply default false when SWAGGER_ENABLED is not set', () => {
-    const { value, error } = validate({});
-    expect(error).toBeUndefined();
-    expect(value.SWAGGER_ENABLED).toBe('false');
+    const result = validate({});
+    expect(result.error).toBeUndefined();
+    if (result.error) throw result.error;
+    expect(result.value.SWAGGER_ENABLED).toBe('false');
   });
 });

@@ -4,7 +4,7 @@ import { ConfigModule, ConfigType } from '@nestjs/config';
 import type { StringValue } from 'ms';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import appConfig from '../config/app.config';
 import authConfig from '../config/auth.config';
 import mailConfig from '../config/mail.config';
@@ -16,9 +16,11 @@ import {
   TokenExpiredException,
   TokenReuseDetectedException,
 } from '../common/exceptions/domain.exception';
+import { MailService } from '../mail/mail.service';
 import { MailModule } from '../mail/mail.module';
 import { Channel } from '../channels/entities/channel.entity';
 import { User } from '../users/entities/user.entity';
+import { Video } from '../videos/entities/video.entity';
 import { UsersModule } from '../users/users.module';
 import {
   cleanAllTables,
@@ -32,7 +34,7 @@ import {
   VerificationTokenType,
 } from './entities/verification-token.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+const ALL_ENTITIES = [User, Channel, Video, RefreshToken, VerificationToken];
 
 async function createAuthTestModule(): Promise<TestingModule> {
   const ds = createTestDataSource(ALL_ENTITIES);
@@ -63,23 +65,24 @@ async function createAuthTestModule(): Promise<TestingModule> {
   }).compile();
 }
 
-function captureConfirmationToken(authService: AuthService): Promise<string> {
+function captureConfirmationToken(mailService: MailService): Promise<string> {
   return new Promise((resolve) => {
-    const mailServiceInstance = (authService as any).mailService;
     jest
-      .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) =>
-        resolve(t),
-      );
+      .spyOn(mailService, 'sendConfirmationEmail')
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
+        resolve(t);
+        return Promise.resolve();
+      });
   });
 }
 
 async function registerConfirmAndLogin(
   authService: AuthService,
+  mailService: MailService,
   email: string,
   password: string,
 ): Promise<{ userId: string; refreshToken: string }> {
-  const capturePromise = captureConfirmationToken(authService);
+  const capturePromise = captureConfirmationToken(mailService);
   const { id: userId } = await authService.register({ email, password });
   const confirmToken = await capturePromise;
   await authService.confirm(confirmToken);
@@ -92,6 +95,7 @@ async function registerConfirmAndLogin(
 
 describe('AuthService — register (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let dataSource: DataSource;
   let verificationTokenRepository: Repository<VerificationToken>;
   let userRepository: Repository<User>;
@@ -99,6 +103,7 @@ describe('AuthService — register (integration)', () => {
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     dataSource = module.get(DataSource);
     verificationTokenRepository = dataSource.getRepository(VerificationToken);
     userRepository = dataSource.getRepository(User);
@@ -162,7 +167,7 @@ describe('AuthService — register (integration)', () => {
   });
 
   it('confirmation token hash matches sha256 of raw token delivered by mail service', async () => {
-    const capturePromise = captureConfirmationToken(authService);
+    const capturePromise = captureConfirmationToken(mailService);
     const result = await authService.register({
       email: 'verify@example.com',
       password: 'password123',
@@ -183,6 +188,7 @@ describe('AuthService — register (integration)', () => {
 
 describe('AuthService — confirm (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let dataSource: DataSource;
   let verificationTokenRepository: Repository<VerificationToken>;
   let userRepository: Repository<User>;
@@ -190,6 +196,7 @@ describe('AuthService — confirm (integration)', () => {
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     dataSource = module.get(DataSource);
     verificationTokenRepository = dataSource.getRepository(VerificationToken);
     userRepository = dataSource.getRepository(User);
@@ -205,7 +212,7 @@ describe('AuthService — confirm (integration)', () => {
   });
 
   it('sets is_confirmed = true and used_at on valid token', async () => {
-    const capturePromise = captureConfirmationToken(authService);
+    const capturePromise = captureConfirmationToken(mailService);
     const { id: userId } = await authService.register({
       email: 'confirm@example.com',
       password: 'password123',
@@ -230,8 +237,8 @@ describe('AuthService — confirm (integration)', () => {
   });
 
   it('throws TokenExpiredException for an expired token', async () => {
-    const capturePromise = captureConfirmationToken(authService);
-    const { id: userId } = await authService.register({
+    const capturePromise = captureConfirmationToken(mailService);
+    await authService.register({
       email: 'expired@example.com',
       password: 'password123',
     });
@@ -306,6 +313,7 @@ describe('AuthService — resendConfirmation (integration)', () => {
 
 describe('AuthService — login (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let jwtService: JwtService;
   let dataSource: DataSource;
   let refreshTokenRepository: Repository<RefreshToken>;
@@ -313,6 +321,7 @@ describe('AuthService — login (integration)', () => {
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     jwtService = module.get(JwtService);
     dataSource = module.get(DataSource);
     refreshTokenRepository = dataSource.getRepository(RefreshToken);
@@ -331,7 +340,7 @@ describe('AuthService — login (integration)', () => {
     email: string,
     password: string,
   ): Promise<string> {
-    const capturePromise = captureConfirmationToken(authService);
+    const capturePromise = captureConfirmationToken(mailService);
     const { id } = await authService.register({ email, password });
     const capturedToken = await capturePromise;
     await authService.confirm(capturedToken);
@@ -385,6 +394,7 @@ describe('AuthService — login (integration)', () => {
 
 describe('AuthService — refresh (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let jwtService: JwtService;
   let dataSource: DataSource;
   let refreshTokenRepository: Repository<RefreshToken>;
@@ -392,6 +402,7 @@ describe('AuthService — refresh (integration)', () => {
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     jwtService = module.get(JwtService);
     dataSource = module.get(DataSource);
     refreshTokenRepository = dataSource.getRepository(RefreshToken);
@@ -409,6 +420,7 @@ describe('AuthService — refresh (integration)', () => {
   it('rotates token: revokes old token and persists new token in DB', async () => {
     const { refreshToken: token1 } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'rotate@example.com',
       'password123',
     );
@@ -433,6 +445,7 @@ describe('AuthService — refresh (integration)', () => {
   it('access token from refresh is a valid JWT with correct sub and email', async () => {
     const { refreshToken } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'jwtrefresh@example.com',
       'password123',
     );
@@ -449,6 +462,7 @@ describe('AuthService — refresh (integration)', () => {
   it('returns valid access token within grace period without revoking family', async () => {
     const { refreshToken: token1 } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'grace@example.com',
       'password123',
     );
@@ -466,14 +480,15 @@ describe('AuthService — refresh (integration)', () => {
 
     const activeTokens = await refreshTokenRepository.findBy({
       family,
-      revoked_at: null,
-    } as any);
+      revoked_at: IsNull(),
+    });
     expect(activeTokens.length).toBeGreaterThan(0);
   });
 
   it('revokes entire family and throws when reuse is detected beyond grace period', async () => {
     const { refreshToken: token1 } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'reuse@example.com',
       'password123',
     );
@@ -503,12 +518,14 @@ describe('AuthService — refresh (integration)', () => {
 
 describe('AuthService — logout (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let dataSource: DataSource;
   let refreshTokenRepository: Repository<RefreshToken>;
 
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     dataSource = module.get(DataSource);
     refreshTokenRepository = dataSource.getRepository(RefreshToken);
   });
@@ -525,6 +542,7 @@ describe('AuthService — logout (integration)', () => {
   it('revokes all active refresh tokens for the user after logout', async () => {
     const { userId, refreshToken: token1 } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'logout@example.com',
       'password123',
     );
@@ -541,11 +559,13 @@ describe('AuthService — logout (integration)', () => {
   it('does not revoke tokens from other users', async () => {
     const { userId: user1Id } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'logout1@example.com',
       'password123',
     );
     const { userId: user2Id } = await registerConfirmAndLogin(
       authService,
+      mailService,
       'logout2@example.com',
       'password123',
     );
@@ -560,25 +580,27 @@ describe('AuthService — logout (integration)', () => {
   });
 });
 
-function capturePasswordResetToken(authService: AuthService): Promise<string> {
+function capturePasswordResetToken(mailService: MailService): Promise<string> {
   return new Promise((resolve) => {
-    const mailServiceInstance = (authService as any).mailService;
     jest
-      .spyOn(mailServiceInstance, 'sendPasswordResetEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) =>
-        resolve(t),
-      );
+      .spyOn(mailService, 'sendPasswordResetEmail')
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
+        resolve(t);
+        return Promise.resolve();
+      });
   });
 }
 
 describe('AuthService — forgotPassword (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let dataSource: DataSource;
   let verificationTokenRepository: Repository<VerificationToken>;
 
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     dataSource = module.get(DataSource);
     verificationTokenRepository = dataSource.getRepository(VerificationToken);
   });
@@ -593,7 +615,7 @@ describe('AuthService — forgotPassword (integration)', () => {
   });
 
   it('persists a password reset token and sends an email containing the raw token', async () => {
-    const capturePromise = capturePasswordResetToken(authService);
+    const capturePromise = capturePasswordResetToken(mailService);
     const { id: userId } = await authService.register({
       email: 'forgot@example.com',
       password: 'password123',
@@ -616,7 +638,7 @@ describe('AuthService — forgotPassword (integration)', () => {
   });
 
   it('invalidates previously issued unused reset tokens', async () => {
-    const capturePromise1 = capturePasswordResetToken(authService);
+    const capturePromise1 = capturePasswordResetToken(mailService);
     const { id: userId } = await authService.register({
       email: 'reissue@example.com',
       password: 'password123',
@@ -628,7 +650,7 @@ describe('AuthService — forgotPassword (integration)', () => {
       .update(firstRawToken)
       .digest('hex');
 
-    const capturePromise2 = capturePasswordResetToken(authService);
+    const capturePromise2 = capturePasswordResetToken(mailService);
     await authService.forgotPassword('reissue@example.com');
     await capturePromise2;
 
@@ -654,6 +676,7 @@ describe('AuthService — forgotPassword (integration)', () => {
 
 describe('AuthService — resetPassword (integration)', () => {
   let authService: AuthService;
+  let mailService: MailService;
   let dataSource: DataSource;
   let verificationTokenRepository: Repository<VerificationToken>;
   let userRepository: Repository<User>;
@@ -662,6 +685,7 @@ describe('AuthService — resetPassword (integration)', () => {
   beforeAll(async () => {
     const module = await createAuthTestModule();
     authService = module.get(AuthService);
+    mailService = module.get(MailService);
     dataSource = module.get(DataSource);
     verificationTokenRepository = dataSource.getRepository(VerificationToken);
     userRepository = dataSource.getRepository(User);
@@ -683,10 +707,11 @@ describe('AuthService — resetPassword (integration)', () => {
   ): Promise<{ userId: string; resetToken: string }> {
     const { userId } = await registerConfirmAndLogin(
       authService,
+      mailService,
       email,
       password,
     );
-    const capturePromise = capturePasswordResetToken(authService);
+    const capturePromise = capturePasswordResetToken(mailService);
     await authService.forgotPassword(email);
     const resetToken = await capturePromise;
     return { userId, resetToken };

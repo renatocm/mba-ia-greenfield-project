@@ -1,17 +1,21 @@
 import * as crypto from 'crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import request from 'supertest';
+import request, { Response } from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { AppModule } from '../src/app.module';
-import { AuthService } from '../src/auth/auth.service';
+import { MailService } from '../src/mail/mail.service';
 import { RefreshToken } from '../src/auth/entities/refresh-token.entity';
 import { VerificationToken } from '../src/auth/entities/verification-token.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { cleanAllTables } from '../src/test/create-test-data-source';
+
+type JsonResponse<T = Record<string, unknown>> = Omit<Response, 'body'> & {
+  body: T;
+};
 
 describe('Auth (e2e)', () => {
   let app: INestApplication<App>;
@@ -59,13 +63,13 @@ describe('Auth (e2e)', () => {
     email: string,
     password = 'password123',
   ): Promise<string> {
-    const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = app.get(MailService);
     let capturedToken = '';
     jest
       .spyOn(mailServiceInstance, 'sendConfirmationEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         capturedToken = t;
+        return Promise.resolve();
       });
     await request(app.getHttpServer())
       .post('/auth/register')
@@ -81,9 +85,10 @@ describe('Auth (e2e)', () => {
     await request(app.getHttpServer())
       .get('/auth/confirm-email')
       .query({ token });
-    const res = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email, password });
+    const res: JsonResponse<{ access_token: string; refresh_token: string }> =
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email, password });
     return {
       access_token: res.body.access_token,
       refresh_token: res.body.refresh_token,
@@ -92,7 +97,7 @@ describe('Auth (e2e)', () => {
 
   describe('POST /auth/register', () => {
     it('returns 201 with { id, email } on valid registration', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({ email: 'user@example.com', password: 'password123' })
         .expect(201);
@@ -106,7 +111,7 @@ describe('Auth (e2e)', () => {
         .post('/auth/register')
         .send({ email: 'dup@example.com', password: 'password123' });
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({ email: 'dup@example.com', password: 'password456' })
         .expect(409);
@@ -115,7 +120,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on missing email', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({ password: 'password123' })
         .expect(400);
@@ -124,7 +129,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on invalid email format', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({ email: 'not-an-email', password: 'password123' })
         .expect(400);
@@ -133,7 +138,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR when password is too short', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({ email: 'user@example.com', password: 'short' })
         .expect(400);
@@ -142,7 +147,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on unknown extra fields', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({
           email: 'user@example.com',
@@ -173,7 +178,7 @@ describe('Auth (e2e)', () => {
         .query({ token })
         .expect(204);
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .get('/auth/confirm-email')
         .query({ token })
         .expect(401);
@@ -189,7 +194,7 @@ describe('Auth (e2e)', () => {
         { expires_at: new Date(0) },
       );
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .get('/auth/confirm-email')
         .query({ token })
         .expect(401);
@@ -198,7 +203,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on missing token query param', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .get('/auth/confirm-email')
         .expect(400);
 
@@ -241,7 +246,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on invalid email format', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/resend-confirmation')
         .send({ email: 'not-an-email' })
         .expect(400);
@@ -265,7 +270,7 @@ describe('Auth (e2e)', () => {
     it('returns 200 on GET /auth/me with a valid access token', async () => {
       const { access_token } = await registerConfirmAndLogin('me@example.com');
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .get('/auth/me')
         .set('Authorization', `Bearer ${access_token}`)
         .expect(200);
@@ -279,7 +284,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('POST /auth/register is accessible without Authorization header (@Public)', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/register')
         .send({ email: 'guardtest@example.com', password: 'password123' });
       expect(res.status).toBe(201);
@@ -300,7 +305,7 @@ describe('Auth (e2e)', () => {
     it('returns 200 with access_token and refresh_token on valid credentials', async () => {
       await registerAndConfirmUser('login@example.com', 'password123');
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'login@example.com', password: 'password123' })
         .expect(200);
@@ -314,7 +319,7 @@ describe('Auth (e2e)', () => {
     it('returns 401 with INVALID_CREDENTIALS on wrong password', async () => {
       await registerAndConfirmUser('wrongpass@example.com', 'password123');
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'wrongpass@example.com', password: 'incorrect' })
         .expect(401);
@@ -323,7 +328,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 401 with INVALID_CREDENTIALS on unknown email', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'nobody@example.com', password: 'password123' })
         .expect(401);
@@ -336,7 +341,7 @@ describe('Auth (e2e)', () => {
         .post('/auth/register')
         .send({ email: 'unconfirmed@example.com', password: 'password123' });
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'unconfirmed@example.com', password: 'password123' })
         .expect(403);
@@ -345,7 +350,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on missing password', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'user@example.com' })
         .expect(400);
@@ -360,7 +365,7 @@ describe('Auth (e2e)', () => {
         'refresh@example.com',
       );
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token })
         .expect(200);
@@ -371,7 +376,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 401 with INVALID_TOKEN on an unknown refresh token', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token: 'not-a-real-token' })
         .expect(401);
@@ -392,7 +397,7 @@ describe('Auth (e2e)', () => {
         { expires_at: new Date(0) },
       );
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token })
         .expect(401);
@@ -408,7 +413,7 @@ describe('Auth (e2e)', () => {
         .post('/auth/refresh')
         .send({ refresh_token: token1 });
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token: token1 })
         .expect(200);
@@ -447,7 +452,7 @@ describe('Auth (e2e)', () => {
         { revoked_at: new Date(Date.now() - 15_000) },
       );
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token: token1 })
         .expect(401);
@@ -465,7 +470,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on missing refresh_token field', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({})
         .expect(400);
@@ -499,7 +504,7 @@ describe('Auth (e2e)', () => {
         .set('Authorization', `Bearer ${access_token}`)
         .expect(204);
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token })
         .expect(401);
@@ -511,13 +516,13 @@ describe('Auth (e2e)', () => {
   });
 
   async function capturePasswordResetToken(email: string): Promise<string> {
-    const authService = app.get(AuthService);
-    const mailServiceInstance = (authService as any).mailService;
+    const mailServiceInstance = app.get(MailService);
     let captured = '';
     jest
       .spyOn(mailServiceInstance, 'sendPasswordResetEmail')
-      .mockImplementationOnce(async (_e: string, _n: string, t: string) => {
+      .mockImplementationOnce((_e: string, _n: string, t: string) => {
         captured = t;
+        return Promise.resolve();
       });
     await request(app.getHttpServer())
       .post('/auth/forgot-password')
@@ -543,7 +548,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on invalid email format', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/forgot-password')
         .send({ email: 'not-an-email' })
         .expect(400);
@@ -567,7 +572,7 @@ describe('Auth (e2e)', () => {
         .send({ email: 'resetok@example.com', password: 'oldpassword' })
         .expect(401);
 
-      const loginRes = await request(app.getHttpServer())
+      const loginRes: JsonResponse = await request(app.getHttpServer())
         .post('/auth/login')
         .send({ email: 'resetok@example.com', password: 'newpassword' })
         .expect(200);
@@ -586,7 +591,7 @@ describe('Auth (e2e)', () => {
         .send({ token, new_password: 'newpassword' })
         .expect(204);
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refresh_token })
         .expect(401);
@@ -596,7 +601,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 401 with INVALID_TOKEN on an unknown token', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/reset-password')
         .send({ token: 'unknown', new_password: 'newpassword' })
         .expect(401);
@@ -613,7 +618,7 @@ describe('Auth (e2e)', () => {
         .send({ token, new_password: 'newpassword' })
         .expect(204);
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/reset-password')
         .send({ token, new_password: 'anotherpass' })
         .expect(401);
@@ -630,7 +635,7 @@ describe('Auth (e2e)', () => {
         { expires_at: new Date(0) },
       );
 
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/reset-password')
         .send({ token, new_password: 'newpassword' })
         .expect(401);
@@ -639,7 +644,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on missing token', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/reset-password')
         .send({ new_password: 'newpassword' })
         .expect(400);
@@ -648,7 +653,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('returns 400 with VALIDATION_ERROR on short new_password', async () => {
-      const res = await request(app.getHttpServer())
+      const res: JsonResponse = await request(app.getHttpServer())
         .post('/auth/reset-password')
         .send({ token: 'abc', new_password: 'short' })
         .expect(400);

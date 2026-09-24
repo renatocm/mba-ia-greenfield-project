@@ -17,8 +17,20 @@ export const envValidationSchema = Joi.object({
   CONFIRMATION_TOKEN_EXPIRATION_HOURS: Joi.number().default(1),
   PASSWORD_RESET_TOKEN_EXPIRATION_HOURS: Joi.number().default(1),
   APP_URL: Joi.string().uri().default('http://localhost:3000'),
+  REDIS_URL: Joi.string().uri().default('redis://redis:6379'),
   MAIL_HOST: Joi.string().default('mailpit'),
   MAIL_PORT: Joi.number().default(1025),
   MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
+  S3_ENDPOINT: Joi.string().uri().default('http://minio:9000'),
+  S3_REGION: Joi.string().default('us-east-1'),
+  AWS_ACCESS_KEY_ID: Joi.string().default('minioadmin'),
+  AWS_SECRET_ACCESS_KEY: Joi.string().default('minioadmin'),
+  S3_FORCE_PATH_STYLE: Joi.string().valid('true', 'false').default('true'),
+  S3_BUCKET_ORIGINALS: Joi.string().default('videos-originals'),
+  S3_BUCKET_PUBLIC: Joi.string().default('videos-public'),
+  S3_MULTIPART_PART_SIZE_BYTES: Joi.number()
+    .integer()
+    .min(5242880)
+    .default(8388608),
 });
